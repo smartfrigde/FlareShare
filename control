@@ -1,0 +1,10 @@
+Package: dev.pzurek.flareshare
+Name: FlareShare
+Version: 0.0.1
+Architecture: iphoneos-arm
+Description: Easily upload images to your preferred Flare instance directly from the native iOS Share Sheet.
+Maintainer: Patryk Żurek
+Author: Patryk Żurek
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000), preferenceloader (>= 2.2.3), firmware (>= 6.0)
+Conflicts: net.mrmad.sslpatch
