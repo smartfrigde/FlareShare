@@ -118,13 +118,16 @@ static void notificationCallback(CFNotificationCenterRef center, void *observer,
     NSString *apiKey = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiKey"), CFSTR("dev.pzurek.flareshare"));
     NSString *baseEndpoint = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiEndpoint"), CFSTR("dev.pzurek.flareshare"));
     
-    NSString *endpoint;
+    // Safely format the base endpoint to ensure no trailing slash exists
     if (baseEndpoint && baseEndpoint.length > 0) {
-        endpoint = [baseEndpoint stringByAppendingString:@"api/urls"];
+        if ([baseEndpoint hasSuffix:@"/"]) {
+            baseEndpoint = [baseEndpoint substringToIndex:baseEndpoint.length - 1];
+        }
     } else {
-        endpoint = @"https://cdn.fl1nt.dev/api/urls";
         baseEndpoint = @"https://cdn.fl1nt.dev";
     }
+    
+    NSString *endpoint = [NSString stringWithFormat:@"%@/api/urls", baseEndpoint];
     NSLog(@"[FlareShare] Using endpoint: %@", endpoint);
     if (!apiKey) apiKey = @"";
     
@@ -180,7 +183,7 @@ static void notificationCallback(CFNotificationCenterRef center, void *observer,
         NSNumber *successStatus = json[@"success"];
         if ([successStatus boolValue]) {
             NSString *fileShortCodeString = json[@"data"][@"shortCode"]; 
-            NSString *fileURLString = [NSString stringWithFormat:@"%@u/%@", baseEndpoint, fileShortCodeString];
+            NSString *fileURLString = [NSString stringWithFormat:@"%@/u/%@", baseEndpoint, fileShortCodeString];
             if (fileURLString) {
                 self.uploadedURL = [NSURL URLWithString:fileURLString];
                 
@@ -207,13 +210,19 @@ static void notificationCallback(CFNotificationCenterRef center, void *observer,
     NSString *apiKey = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiKey"), CFSTR("dev.pzurek.flareshare"));
     NSString *baseEndpoint = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiEndpoint"), CFSTR("dev.pzurek.flareshare"));
     
-    NSString *endpoint;
+    // Safely format the base endpoint to ensure no trailing slash exists
     if (baseEndpoint && baseEndpoint.length > 0) {
-        endpoint = [baseEndpoint stringByAppendingString:@"api/file"];
+        if ([baseEndpoint hasSuffix:@"/"]) {
+            baseEndpoint = [baseEndpoint substringToIndex:baseEndpoint.length - 1];
+        }
     } else {
-        endpoint = @"https://cdn.fl1nt.dev/api/file";
         baseEndpoint = @"https://cdn.fl1nt.dev";
     }
+    
+    // Safely append the correct path with exactly one slash
+    NSString *endpoint = [NSString stringWithFormat:@"%@/api/files", baseEndpoint];
+    NSLog(@"[FlareShare] Using endpoint: %@", endpoint);
+
     if (!apiKey) apiKey = @"";
 
     // Write to the global /var/tmp/ instead of the app sandbox to guarantee cURL can read it
