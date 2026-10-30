@@ -30,7 +30,7 @@ To ensure stability:
 Users can configure the tweak directly in the iOS **Settings app**. 
 Preferences are stored in `/var/mobile/Library/Preferences/dev.pzurek.flareshare.plist`.
 
-* **Instance URL:** The target URL for the POST request (Defaults to `https://cdn.fl1nt.dev/api/file`).
+* **Instance URL:** The target URL for the POST requests (Defaults to `https://cdn.fl1nt.dev/`).
 * **Flare API Key:** The token passed in the `Authorization: Bearer <key>` header. Get your API key from your dashboard.
 
 ## Building and Installation

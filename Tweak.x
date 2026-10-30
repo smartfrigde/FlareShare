@@ -55,11 +55,15 @@ static void notificationCallback(CFNotificationCenterRef center, void *observer,
 
 - (BOOL)canPerformWithActivityItems:(NSArray *)activityItems {
     for (id item in activityItems) {
+        NSLog(@"[FlareShare] Checking item: %@", item);
         if ([NSStringFromClass([item class]) isEqualToString:@"PLManagedAsset"]) {
             return YES;
         } else if ([item isKindOfClass:[NSURL class]]) {
             NSURL *url = (NSURL *)item;
             if ([url.scheme isEqualToString:@"assets-library"]) {
+                return YES;
+            }
+            if ([url.scheme isEqualToString:@"http"] || [url.scheme isEqualToString:@"https"]) {
                 return YES;
             }
         }
@@ -76,7 +80,11 @@ static void notificationCallback(CFNotificationCenterRef center, void *observer,
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         for (id item in self.itemsToShare) {
-            if ([item isKindOfClass:[NSURL class]] && [[(NSURL *)item scheme] isEqualToString:@"assets-library"]) {
+            NSLog(@"[FlareShare] Processing item: %@", item);
+            if ([item isKindOfClass:[NSURL class]] && ( [[(NSURL *)item scheme] isEqualToString:@"http"] || [[(NSURL *)item scheme] isEqualToString:@"https"] )) {
+                NSURL *url = (NSURL *)item;
+                [self shortenURL:url];
+            } else if ([item isKindOfClass:[NSURL class]] && [[(NSURL *)item scheme] isEqualToString:@"assets-library"]) {
                 ALAssetsLibrary *library = [[ALAssetsLibrary alloc] init];
                 [library assetForURL:(NSURL *)item resultBlock:^(ALAsset *asset) {
                     if (asset) {
@@ -106,12 +114,106 @@ static void notificationCallback(CFNotificationCenterRef center, void *observer,
     });
 }
 
+- (void)shortenURL:(NSURL *)url {
+    NSString *apiKey = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiKey"), CFSTR("dev.pzurek.flareshare"));
+    NSString *baseEndpoint = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiEndpoint"), CFSTR("dev.pzurek.flareshare"));
+    
+    NSString *endpoint;
+    if (baseEndpoint && baseEndpoint.length > 0) {
+        endpoint = [baseEndpoint stringByAppendingString:@"api/urls"];
+    } else {
+        endpoint = @"https://cdn.fl1nt.dev/api/urls";
+        baseEndpoint = @"https://cdn.fl1nt.dev";
+    }
+    NSLog(@"[FlareShare] Using endpoint: %@", endpoint);
+    if (!apiKey) apiKey = @"";
+    
+    NSString *authHeader = [NSString stringWithFormat:@"Authorization: Bearer %@", apiKey];
+
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath:@"/usr/bin/curl"]; 
+    
+    [task setArguments:@[@"--tlsv1.2", @"-X", @"POST", 
+                         @"-H", authHeader, 
+                         @"-H", @"Content-Type: application/json", 
+                         @"--data", [NSString stringWithFormat:@"{\"url\": \"%@\"}", url.absoluteString],
+                         endpoint]];
+    
+    // Scrub MobileSubstrate injections from the cURL process
+    NSMutableDictionary *cleanEnv = [[[NSProcessInfo processInfo] environment] mutableCopy];
+    [cleanEnv removeObjectForKey:@"DYLD_INSERT_LIBRARIES"];
+    [task setEnvironment:cleanEnv];
+    
+    NSPipe *outputPipe = [NSPipe pipe];
+    NSPipe *errorPipe = [NSPipe pipe];
+    
+    [task setStandardOutput:outputPipe];
+    [task setStandardError:errorPipe];
+    
+    NSLog(@"[FlareShare] Launching cURL task...");
+    
+    @try {
+        [task launch];
+        [task waitUntilExit];
+    } @catch (NSException *exception) {
+        NSLog(@"[FlareShare] NSTask Exception CRASH: %@", exception.reason);
+        [self cleanupAndFinish:NO];
+        return;
+    }
+    
+    // Read stdout and stderr
+    NSData *responseData = [[outputPipe fileHandleForReading] readDataToEndOfFile];
+    NSData *errorData = [[errorPipe fileHandleForReading] readDataToEndOfFile];
+    
+    NSString *errorString = [[NSString alloc] initWithData:errorData encoding:NSUTF8StringEncoding];
+    
+    NSLog(@"[FlareShare] cURL Exit Code: %d", [task terminationStatus]);
+    if (errorString && errorString.length > 0) {
+        NSLog(@"[FlareShare] cURL STDERR: \n%@", errorString);
+    }
+    
+    if (responseData && responseData.length > 0) {
+        NSError *error;
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&error];
+        NSLog(@"[FlareShare] Server Response: %@", json);
+        
+        NSNumber *successStatus = json[@"success"];
+        if ([successStatus boolValue]) {
+            NSString *fileShortCodeString = json[@"data"][@"shortCode"]; 
+            NSString *fileURLString = [NSString stringWithFormat:@"%@u/%@", baseEndpoint, fileShortCodeString];
+            if (fileURLString) {
+                self.uploadedURL = [NSURL URLWithString:fileURLString];
+                
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Shorten Complete" 
+                                                                    message:fileURLString 
+                                                                   delegate:self 
+                                                          cancelButtonTitle:@"Close" 
+                                                          otherButtonTitles:@"Open in Browser", nil];
+                    [alert show];
+                });
+                return; 
+            }
+        }
+    } else {
+        NSLog(@"[FlareShare] cURL output was completely empty.");
+    }
+    
+    [self cleanupAndFinish:NO];
+} 
+
 - (void)uploadData:(NSData *)fileData filename:(NSString *)filename mimeType:(NSString *)mimeType {
     
     NSString *apiKey = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiKey"), CFSTR("dev.pzurek.flareshare"));
-    NSString *endpoint = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiEndpoint"), CFSTR("dev.pzurek.flareshare"));
+    NSString *baseEndpoint = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("apiEndpoint"), CFSTR("dev.pzurek.flareshare"));
     
-    if (!endpoint || endpoint.length == 0) endpoint = @"https://cdn.fl1nt.dev/api/file";
+    NSString *endpoint;
+    if (baseEndpoint && baseEndpoint.length > 0) {
+        endpoint = [baseEndpoint stringByAppendingString:@"api/file"];
+    } else {
+        endpoint = @"https://cdn.fl1nt.dev/api/file";
+        baseEndpoint = @"https://cdn.fl1nt.dev";
+    }
     if (!apiKey) apiKey = @"";
 
     // Write to the global /var/tmp/ instead of the app sandbox to guarantee cURL can read it
